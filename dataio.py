@@ -10,11 +10,11 @@ import scipy.ndimage
 import scipy.special
 import skimage
 import skimage.filters
-import skvideo.io
+# import skvideo.io
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
-from torchvision.transforms import Resize, Compose, ToTensor, Normalize
+from torchvision.transforms import Resize, Compose, ToTensor, Normalize, Grayscale
 
 
 def get_mgrid(sidelen, dim=2):
@@ -578,11 +578,13 @@ class Implicit2DWrapper(torch.utils.data.Dataset):
     def __init__(self, dataset, sidelength=None, compute_diff=None):
 
         if isinstance(sidelength, int):
-            sidelength = (sidelength, sidelength)
+            sidelength = (sidelength[0], sidelength[1])
+#             sidelength = (sidelength, sidelength)
         self.sidelength = sidelength
 
         self.transform = Compose([
             Resize(sidelength),
+            Grayscale(num_output_channels=1),
             ToTensor(),
             Normalize(torch.Tensor([0.5]), torch.Tensor([0.5]))
         ])
@@ -590,9 +592,12 @@ class Implicit2DWrapper(torch.utils.data.Dataset):
         self.compute_diff = compute_diff
         self.dataset = dataset
         self.mgrid = get_mgrid(sidelength)
+        self.img_channels = 1
+
 
     def __len__(self):
-        return len(self.dataset)
+#         return len(self.dataset) 
+        return 1
 
     def __getitem__(self, idx):
         img = self.transform(self.dataset[idx])
@@ -608,8 +613,8 @@ class Implicit2DWrapper(torch.utils.data.Dataset):
             gradx = scipy.ndimage.sobel(img.numpy(), axis=1).squeeze(0)[..., None]
             grady = scipy.ndimage.sobel(img.numpy(), axis=2).squeeze(0)[..., None]
             laplace = scipy.ndimage.laplace(img.numpy()).squeeze(0)[..., None]
-
-        img = img.permute(1, 2, 0).view(-1, self.dataset.img_channels)
+            
+        img = img.permute(1, 2, 0).view(-1, self.img_channels)
 
         in_dict = {'idx': idx, 'coords': self.mgrid}
         gt_dict = {'img': img}
@@ -641,11 +646,11 @@ class Implicit2DWrapper(torch.utils.data.Dataset):
 
         return spatial_img, img, gt_dict
 
-
+    
 class Implicit3DWrapper(torch.utils.data.Dataset):
     def __init__(self, dataset, sidelength=None, sample_fraction=1.):
 
-        if isinstance(sidelength, int):
+        if isinstance(sidelength[0], int):
             sidelength = 3 * (sidelength,)
 
         self.dataset = dataset
@@ -887,3 +892,84 @@ class CompositeGradients(Dataset):
                    'gradients': self.comp_grads}
 
         return in_dict, gt_dict
+
+                            
+class Implicit2DWrapperPhoton(torch.utils.data.Dataset):
+    def __init__(self, dataset, sidelength=None, compute_diff=None):
+
+        if isinstance(sidelength, int):
+            sidelength = (sidelength[0], sidelength[1])
+        self.sidelength = sidelength
+
+        self.transform = Compose([
+            Resize(sidelength),
+            Grayscale(num_output_channels=1),
+            ToTensor(),
+            Normalize(torch.Tensor([0.5]), torch.Tensor([0.5]))
+        ])
+
+        self.compute_diff = compute_diff
+        self.dataset = dataset
+        self.mgrid = get_mgrid(sidelength)
+        self.img_channels = 1
+
+    def __len__(self):
+        return 1
+
+    def __getitem__(self, idx):
+#         self.index_map = {}
+#         index = 0
+#         for data in self.dataset:
+#             img_data = data['img']
+#             coord_data = data['coords']
+#             self.index_map[index] = (img_data, coord_data)
+#             index+=1
+            
+#         img_data, coord_data = self.index_map[idx]
+        img = self.transform(self.dataset[idx])
+#         img = self.transform(img_data)
+
+        if self.compute_diff == 'gradients':
+            img *= 1e1
+            gradx = scipy.ndimage.sobel(img.numpy(), axis=1).squeeze(0)[..., None]
+            grady = scipy.ndimage.sobel(img.numpy(), axis=2).squeeze(0)[..., None]
+        elif self.compute_diff == 'laplacian':
+            img *= 1e4
+            laplace = scipy.ndimage.laplace(img.numpy()).squeeze(0)[..., None]
+        elif self.compute_diff == 'all':
+            gradx = scipy.ndimage.sobel(img.numpy(), axis=1).squeeze(0)[..., None]
+            grady = scipy.ndimage.sobel(img.numpy(), axis=2).squeeze(0)[..., None]
+            laplace = scipy.ndimage.laplace(img.numpy()).squeeze(0)[..., None]
+            
+        img = img.permute(1, 2, 0).view(-1, self.img_channels)
+
+        in_dict = {'idx': idx, 'coords': self.mgrid}
+        gt_dict = {'img': img}
+
+        if self.compute_diff == 'gradients':
+            gradients = torch.cat((torch.from_numpy(gradx).reshape(-1, 1),
+                                   torch.from_numpy(grady).reshape(-1, 1)),
+                                  dim=-1)
+            gt_dict.update({'gradients': gradients})
+
+        elif self.compute_diff == 'laplacian':
+            gt_dict.update({'laplace': torch.from_numpy(laplace).view(-1, 1)})
+
+        elif self.compute_diff == 'all':
+            gradients = torch.cat((torch.from_numpy(gradx).reshape(-1, 1),
+                                   torch.from_numpy(grady).reshape(-1, 1)),
+                                  dim=-1)
+            gt_dict.update({'gradients': gradients})
+            gt_dict.update({'laplace': torch.from_numpy(laplace).view(-1, 1)})
+
+        return in_dict, gt_dict
+
+    def get_item_small(self, idx):
+        img = self.transform(self.dataset[idx])
+        spatial_img = img.clone()
+        img = img.permute(1, 2, 0).view(-1, self.dataset.img_channels)
+
+        gt_dict = {'img': img}
+
+        return spatial_img, img, gt_dict
+

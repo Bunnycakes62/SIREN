@@ -9,7 +9,7 @@ import skimage.measure
 import cv2
 import meta_modules
 import scipy.io.wavfile as wavfile
-import cmapy
+# import cmapy
 
 
 def cond_mkdir(path):
@@ -328,7 +328,12 @@ def write_video_summary(vid_dataset, model, model_input, gt, model_output, write
 
 def write_image_summary(image_resolution, model, model_input, gt,
                         model_output, writer, total_steps, prefix='train_'):
-    gt_img = dataio.lin2img(gt['img'], image_resolution)
+    print(gt['img'].shape)
+    gt_img = gt['img'][:,:,:,0]
+    gt_img = torch.transpose(gt_img, 2, 1)
+    print(gt_img.shape)
+    gt_img = dataio.lin2img(gt_img, image_resolution)
+    print('model shape:', model_output['model_out'].shape)
     pred_img = dataio.lin2img(model_output['model_out'], image_resolution)
 
     img_gradient = diff_operators.gradient(model_output['model_out'], model_output['model_in'])
@@ -591,3 +596,5 @@ def write_psnr(pred_img, gt_img, writer, iter, prefix):
 
     writer.add_scalar(prefix + "psnr", np.mean(psnrs), iter)
     writer.add_scalar(prefix + "ssim", np.mean(ssims), iter)
+
+    

@@ -19,8 +19,13 @@ class BatchLinear(nn.Linear, MetaModule):
 
         bias = params.get('bias', None)
         weight = params['weight']
-
-        output = input.matmul(weight.permute(*[i for i in range(len(weight.shape) - 2)], -1, -2))
+        
+        print(f'weight: {weight.shape}, input: {input.shape}')
+        print(f'new input shape: {input.view(-1,154).shape}')
+        print(f'bias: {bias.shape}')
+        
+        output = torch.matmul(input.view(-1,154), weight)
+#         output = input.matmul(weight.permute(*[i for i in range(len(weight.shape) - 2)], -1, -2))
         output += bias.unsqueeze(-2)
         return output
 
@@ -31,7 +36,7 @@ class Sine(nn.Module):
 
     def forward(self, input):
         # See paper sec. 3.2, final paragraph, and supplement Sec. 1.5 for discussion of factor 30
-        return torch.sin(30 * input)
+        return torch.sin(5 * input)
 
 
 class FCBlock(MetaModule):
@@ -119,7 +124,7 @@ class FCBlock(MetaModule):
 class SingleBVPNet(MetaModule):
     '''A canonical representation network for a BVP.'''
 
-    def __init__(self, out_features=1, type='sine', in_features=2,
+    def __init__(self, out_features=1, type='sine', in_features=1,
                  mode='mlp', hidden_features=256, num_hidden_layers=3, **kwargs):
         super().__init__()
         self.mode = mode
@@ -624,7 +629,7 @@ def sine_init(m):
         if hasattr(m, 'weight'):
             num_input = m.weight.size(-1)
             # See supplement Sec. 1.5 for discussion of factor 30
-            m.weight.uniform_(-np.sqrt(6 / num_input) / 30, np.sqrt(6 / num_input) / 30)
+            m.weight.uniform_(-np.sqrt(6 / num_input) / 5, np.sqrt(6 / num_input) / 5)
 
 
 def first_layer_sine_init(m):
