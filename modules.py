@@ -20,12 +20,7 @@ class BatchLinear(nn.Linear, MetaModule):
         bias = params.get('bias', None)
         weight = params['weight']
         
-        print(f'weight: {weight.shape}, input: {input.shape}')
-        print(f'new input shape: {input.view(-1,154).shape}')
-        print(f'bias: {bias.shape}')
-        
-        output = torch.matmul(input.view(-1,154), weight)
-#         output = input.matmul(weight.permute(*[i for i in range(len(weight.shape) - 2)], -1, -2))
+        output = input.matmul(weight.permute(*[i for i in range(len(weight.shape) - 2)], -1, -2))
         output += bias.unsqueeze(-2)
         return output
 

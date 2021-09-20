@@ -9,6 +9,7 @@ import skimage.measure
 import cv2
 import meta_modules
 import scipy.io.wavfile as wavfile
+from PIL import Image, ImageDraw, ImageFont
 # import cmapy
 
 
@@ -598,3 +599,94 @@ def write_psnr(pred_img, gt_img, writer, iter, prefix):
     writer.add_scalar(prefix + "ssim", np.mean(ssims), iter)
 
     
+
+def write_detector_summary(detector_dataset, model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
+    resolution = detector_dataset.shape
+    frames = [0, 15, 30, 45, 60, 73]
+    Nslice = 10
+    with torch.no_grad():
+        coords = [dataio.get_mgrid_rect((1, resolution[1], resolution[2]), dim=3)[None,...].cuda() for f in frames]
+        for idx, f in enumerate(frames):
+            coords[idx][..., 0] = (f / (resolution[0] - 1) - 0.5) * 2
+        coords = torch.cat(coords, dim=0)
+
+        output = torch.zeros(coords.shape)
+        split = int(coords.shape[1] / Nslice)
+        for i in range(Nslice):
+            pred = model({'coords':coords[:, i*split:(i+1)*split, :]})['model_out']
+            output[:, i*split:(i+1)*split, :] =  pred.cpu()
+
+    pred_det = output.view(len(frames), resolution[1], resolution[2], 3) / 2 + 0.5
+    pred_det = torch.clamp(pred_det, 0, 1)
+    pred_det = pred_det[:,:,:,1]
+    pred_det = torch.unsqueeze(pred_det, -1)
+    gt_det = torch.from_numpy(detector_dataset.detector[frames, :, :, :])
+    psnr = 10*torch.log10(1 / torch.mean((gt_det - pred_det)**2))
+
+    pred_det = pred_det.permute(0, 3, 1, 2)
+    gt_det = gt_det.permute(0, 3, 1, 2)
+
+    output_vs_gt = torch.cat((gt_det, pred_det), dim=-2)
+    writer.add_image(prefix + 'output_vs_gt', make_grid(output_vs_gt, scale_each=False, normalize=True),
+                     global_step=total_steps)
+    min_max_summary(prefix + 'coords', model_input['coords'], writer, total_steps)
+    min_max_summary(prefix + 'pred_det', pred_det, writer, total_steps)
+    writer.add_scalar(prefix + "psnr", psnr, total_steps)
+    
+    
+def make_images(detector_dataset, model, model_input, gt, model_output, total_steps, data_shape, model_dir):
+    ground_truth_video = np.reshape(
+          gt['img'].cpu().detach().numpy(), 
+          (data_shape[0], data_shape[1], data_shape[2], -1)
+        )
+    predict_video = np.reshape(
+            model_output['model_out'].cpu().detach().numpy(), 
+            (data_shape[0], data_shape[1], data_shape[2], -1)
+        )
+    
+    #Plot y pred vs gt
+    pred = (predict_video-predict_video.min())/(predict_video.max()-predict_video.min())
+    plt.figure(tight_layout=True)
+    plt.scatter(-np.log(ground_truth_video+1e-7), -np.log(predict_video+1e-7))        
+    plt.xlabel('Truth')
+    plt.ylabel('Pred')
+    plt_name = os.path.join(model_dir, 'pred_vs_truth.png')
+    plt.savefig(plt_name, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.clf()
+
+    # Histogram of value overlaps
+    plt.hist(pred.flatten(), alpha=0.5, label='predicted')
+    plt.hist(ground_truth_video.flatten(), alpha=0.5, label='ground truth')
+    plt.xlabel('Normalized Values')
+    plt.ylabel('Count')
+    plt.legend(loc='upper right')
+    plt_name = os.path.join(model_dir, 'histogram.png')
+    plt.savefig(plt_name, facecolor='white')
+    plt.clf()
+
+
+    diff = np.sum(abs(ground_truth_video - predict_video), axis=(1,2,3))
+    ground_truth_video = np.uint8((ground_truth_video * 1.0 + 0.5) * 255)
+    predict_video = np.uint8((predict_video * 1.0 + 0.5) * 255)
+    render_video = np.concatenate((ground_truth_video, predict_video), axis=1)
+
+    for step in range(predict_video.shape[0]):
+        im_name = os.path.join(model_dir, '{:05d}.png'.format(step))
+        gt_name = os.path.join(model_dir, '{:05d}_gt.png'.format(step))
+        pred_name = os.path.join(model_dir, '{:05d}_pred.png'.format(step))
+
+
+        im_render = Image.fromarray(np.squeeze(render_video[step], -1) , 'L').convert('RGB')
+        gt_im = Image.fromarray(np.squeeze(ground_truth_video[step],-1), 'L').convert('RGB')
+        pred_im = Image.fromarray(np.squeeze(predict_video[step],-1), 'L').convert('RGB')
+
+        
+        gt_draw = ImageDraw.Draw(gt_im)
+        pred_draw = ImageDraw.Draw(pred_im)
+        draw = ImageDraw.Draw(im_render)
+        draw.text((0, 0), "{:.2f}".format(diff[step]), (255,0,0))
+
+        im_render.save(im_name)
+        gt_im.save(gt_name)
+        pred_im.save(pred_name)
+        

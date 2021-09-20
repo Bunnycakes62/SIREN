@@ -12,7 +12,7 @@ import shutil
 
 
 def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_checkpoint, model_dir, loss_fn,
-          summary_fn, val_dataloader=None, double_precision=False, clip_grad=False, use_lbfgs=False, loss_schedules=None):
+          summary_fn, img_summary, data_shape, val_dataloader=None, double_precision=False, clip_grad=False, use_lbfgs=False, loss_schedules=None):
 
     optim = torch.optim.Adam(lr=lr, params=model.parameters())
 
@@ -127,7 +127,9 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
                    os.path.join(checkpoints_dir, 'model_final.pth'))
         np.savetxt(os.path.join(checkpoints_dir, 'train_losses_final.txt'),
                    np.array(train_losses))
-
+        
+        model_output = model(model_input)
+        img_summary(model, model_input, gt, model_output, total_steps, data_shape, model_dir)
 
 class LinearDecaySchedule():
     def __init__(self, start_val, final_val, num_steps):
